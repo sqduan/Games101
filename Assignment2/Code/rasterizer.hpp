@@ -54,6 +54,12 @@ namespace rst
         int col_id = 0;
     };
 
+    // The struct to describe 2D bounding box
+    struct bounding_box {
+        Eigen::Vector2f min_point;
+        Eigen::Vector2f max_point;
+    };
+
     class rasterizer
     {
     public:

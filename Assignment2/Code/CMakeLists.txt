@@ -5,6 +5,9 @@ find_package(OpenCV REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# Define a C++ macro using add_compile_definitions()
+add_compile_definitions(DEBUG)
+
 include_directories(/usr/local/include)
 
 add_executable(Rasterizer main.cpp rasterizer.hpp rasterizer.cpp global.hpp Triangle.hpp Triangle.cpp)

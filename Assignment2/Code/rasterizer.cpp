@@ -9,7 +9,7 @@
 #include <opencv2/opencv.hpp>
 #include <math.h>
 
-
+// Load the positions of vertices
 rst::pos_buf_id rst::rasterizer::load_positions(const std::vector<Eigen::Vector3f> &positions)
 {
     auto id = get_next_id();
@@ -18,6 +18,7 @@ rst::pos_buf_id rst::rasterizer::load_positions(const std::vector<Eigen::Vector3
     return {id};
 }
 
+// Load the indices of vertices
 rst::ind_buf_id rst::rasterizer::load_indices(const std::vector<Eigen::Vector3i> &indices)
 {
     auto id = get_next_id();
@@ -26,6 +27,7 @@ rst::ind_buf_id rst::rasterizer::load_indices(const std::vector<Eigen::Vector3i>
     return {id};
 }
 
+// Load the color of each vertices
 rst::col_buf_id rst::rasterizer::load_colors(const std::vector<Eigen::Vector3f> &cols)
 {
     auto id = get_next_id();
@@ -34,22 +36,64 @@ rst::col_buf_id rst::rasterizer::load_colors(const std::vector<Eigen::Vector3f> 
     return {id};
 }
 
+// Transfer from 
 auto to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
 {
     return Vector4f(v3.x(), v3.y(), v3.z(), w);
 }
 
+static void getTriangleBoundingBox(const Triangle& t, rst::bounding_box& box)
+{
+    // Compute the minimum and maximum points of the bounding box
+    box.min_point.x() = std::numeric_limits<float>::max();
+    box.min_point.y() = std::numeric_limits<float>::max();
+    box.max_point.x() = std::numeric_limits<float>::lowest();
+    box.max_point.y() = std::numeric_limits<float>::lowest();
+
+    // Update the bounding box value
+    for (auto& v : t.v) {
+        box.min_point.x() = std::min(box.min_point.x(), v.x());
+        box.min_point.y() = std::min(box.min_point.y(), v.y());
+        box.max_point.x() = std::max(box.max_point.x(), v.x());
+        box.max_point.y() = std::max(box.max_point.y(), v.y());
+    }
+
+#ifdef DEBUG
+    std::cout << "------------------------------------------------" << std::endl;
+    std::cout << "The triangle's vertices are: " << t.v[0].transpose() << " "
+        << t.v[1].transpose() << " " << t.v[2].transpose() << std::endl;
+    std::cout << "The bounding box vertices are: " << box.min_point.transpose() << " "
+        << box.max_point.transpose() << std::endl;
+#endif
+
+    return; 
+}
 
 static bool insideTriangle(int x, int y, const Vector3f* _v)
 {   
+    bool is_inside = false;
     // TODO : Implement this function to check if the point (x, y) is inside the triangle represented by _v[0], _v[1], _v[2]
+    Vector3f v0 = _v[1] - _v[0];
+    Vector3f v1 = _v[2] - _v[1];
+    Vector3f v2 = _v[0] - _v[2];
+
+    float cross1 = (x - _v[0].x()) * v0.y() - (y - _v[0].y()) * v0.x();
+    float cross2 = (x - _v[1].x()) * v1.y() - (y - _v[1].y()) * v1.x();
+    float cross3 = (x - _v[2].x()) * v2.y() - (y - _v[2].y()) * v2.x();
+
+    is_inside = (cross1 > 0 && cross2 > 0 && cross3 > 0) ||
+                (cross1 < 0 && cross2 < 0 && cross3 < 0);
+    return is_inside;
 }
 
 static std::tuple<float, float, float> computeBarycentric2D(float x, float y, const Vector3f* v)
 {
-    float c1 = (x*(v[1].y() - v[2].y()) + (v[2].x() - v[1].x())*y + v[1].x()*v[2].y() - v[2].x()*v[1].y()) / (v[0].x()*(v[1].y() - v[2].y()) + (v[2].x() - v[1].x())*v[0].y() + v[1].x()*v[2].y() - v[2].x()*v[1].y());
-    float c2 = (x*(v[2].y() - v[0].y()) + (v[0].x() - v[2].x())*y + v[2].x()*v[0].y() - v[0].x()*v[2].y()) / (v[1].x()*(v[2].y() - v[0].y()) + (v[0].x() - v[2].x())*v[1].y() + v[2].x()*v[0].y() - v[0].x()*v[2].y());
-    float c3 = (x*(v[0].y() - v[1].y()) + (v[1].x() - v[0].x())*y + v[0].x()*v[1].y() - v[1].x()*v[0].y()) / (v[2].x()*(v[0].y() - v[1].y()) + (v[1].x() - v[0].x())*v[2].y() + v[0].x()*v[1].y() - v[1].x()*v[0].y());
+    float c1 = (x*(v[1].y() - v[2].y()) + (v[2].x() - v[1].x())*y + v[1].x()*v[2].y() - v[2].x()*v[1].y()) /
+        (v[0].x()*(v[1].y() - v[2].y()) + (v[2].x() - v[1].x())*v[0].y() + v[1].x()*v[2].y() - v[2].x()*v[1].y());
+    float c2 = (x*(v[2].y() - v[0].y()) + (v[0].x() - v[2].x())*y + v[2].x()*v[0].y() - v[0].x()*v[2].y()) /
+        (v[1].x()*(v[2].y() - v[0].y()) + (v[0].x() - v[2].x())*v[1].y() + v[2].x()*v[0].y() - v[0].x()*v[2].y());
+    float c3 = (x*(v[0].y() - v[1].y()) + (v[1].x() - v[0].x())*y + v[0].x()*v[1].y() - v[1].x()*v[0].y()) /
+        (v[2].x()*(v[0].y() - v[1].y()) + (v[1].x() - v[0].x())*v[2].y() + v[0].x()*v[1].y() - v[1].x()*v[0].y());
     return {c1,c2,c3};
 }
 
@@ -63,18 +107,24 @@ void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf
     float f2 = (50 + 0.1) / 2.0;
 
     Eigen::Matrix4f mvp = projection * view * model;
+
+    // For each of the triangles
     for (auto& i : ind)
     {
         Triangle t;
+
+        // Calculate the transformation for the vertices
         Eigen::Vector4f v[] = {
-                mvp * to_vec4(buf[i[0]], 1.0f),
-                mvp * to_vec4(buf[i[1]], 1.0f),
-                mvp * to_vec4(buf[i[2]], 1.0f)
+            mvp * to_vec4(buf[i[0]], 1.0f),
+            mvp * to_vec4(buf[i[1]], 1.0f),
+            mvp * to_vec4(buf[i[2]], 1.0f)
         };
+
         //Homogeneous division
         for (auto& vec : v) {
             vec /= vec.w();
         }
+
         //Viewport transformation
         for (auto & vert : v)
         {
@@ -83,6 +133,7 @@ void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf
             vert.z() = vert.z() * f1 + f2;
         }
 
+        // Set the vertex of triangle on the screen
         for (int i = 0; i < 3; ++i)
         {
             t.setVertex(i, v[i].head<3>());
@@ -104,18 +155,38 @@ void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf
 
 //Screen space rasterization
 void rst::rasterizer::rasterize_triangle(const Triangle& t) {
+    bool is_inside;
+    Eigen::Vector3f pixel;
+
     auto v = t.toVector4();
     
     // TODO : Find out the bounding box of current triangle.
+    rst::bounding_box box;
+    getTriangleBoundingBox(t, box);
+    
     // iterate through the pixel and find if the current pixel is inside the triangle
+    for (int y = int(box.min_point.y()); y < int(box.max_point.y()); y++) {
+        for (int x = int(box.min_point.x()); x < int(box.max_point.x()); x++) {
+            is_inside = insideTriangle(x, y, t.v);
+            if (is_inside) {
+                auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
+                float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+                float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+                z_interpolated *= w_reciprocal;
 
-    // If so, use the following code to get the interpolated z value.
-    //auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
-    //float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
-    //float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
-    //z_interpolated *= w_reciprocal;
+                if (z_interpolated < depth_buf[x * width + y]) {
+                    pixel.x() = x;
+                    pixel.y() = y;
+                    pixel.z() = z_interpolated;
 
-    // TODO : set the current pixel (use the set_pixel function) to the color of the triangle (use getColor function) if it should be painted.
+                    // Set the color of the pixel
+                    set_pixel(pixel, t.getColor());
+                    depth_buf[x * width + y] = z_interpolated;
+                }
+
+            }
+        }
+    }
 }
 
 void rst::rasterizer::set_model(const Eigen::Matrix4f& m)
@@ -153,7 +224,7 @@ rst::rasterizer::rasterizer(int w, int h) : width(w), height(h)
 
 int rst::rasterizer::get_index(int x, int y)
 {
-    return (height-1-y)*width + x;
+    return (height - 1 - y) * width + x;
 }
 
 void rst::rasterizer::set_pixel(const Eigen::Vector3f& point, const Eigen::Vector3f& color)
