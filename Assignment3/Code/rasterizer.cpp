@@ -149,7 +149,51 @@ auto to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
     return Vector4f(v3.x(), v3.y(), v3.z(), w);
 }
 
-static bool insideTriangle(int x, int y, const Vector4f* _v){
+static void getTriangleBoundingBox(const Triangle& t, rst::bounding_box& box)
+{
+    // Compute the minimum and maximum points of the bounding box
+    box.min_point.x() = std::numeric_limits<float>::max();
+    box.min_point.y() = std::numeric_limits<float>::max();
+    box.max_point.x() = std::numeric_limits<float>::lowest();
+    box.max_point.y() = std::numeric_limits<float>::lowest();
+
+    // Update the bounding box value
+    for (auto& v : t.v) {
+        box.min_point.x() = std::min(box.min_point.x(), v.x());
+        box.min_point.y() = std::min(box.min_point.y(), v.y());
+        box.max_point.x() = std::max(box.max_point.x(), v.x());
+        box.max_point.y() = std::max(box.max_point.y(), v.y());
+    }
+
+#ifdef DEBUG
+    std::cout << "------------------------------------------------" << std::endl;
+    std::cout << "The triangle's vertices are: " << t.v[0].transpose() << " "
+        << t.v[1].transpose() << " " << t.v[2].transpose() << std::endl;
+    std::cout << "The bounding box vertices are: " << box.min_point.transpose() << " "
+        << box.max_point.transpose() << std::endl;
+#endif
+
+    return; 
+}
+
+static bool insideTriangle(int x, int y, const Vector3f* _v)
+{   
+    bool is_inside = false;
+    // TODO : Implement this function to check if the point (x, y) is inside the triangle represented by _v[0], _v[1], _v[2]
+    Vector3f v0 = _v[1] - _v[0];
+    Vector3f v1 = _v[2] - _v[1];
+    Vector3f v2 = _v[0] - _v[2];
+
+    float cross1 = (x - _v[0].x()) * v0.y() - (y - _v[0].y()) * v0.x();
+    float cross2 = (x - _v[1].x()) * v1.y() - (y - _v[1].y()) * v1.x();
+    float cross3 = (x - _v[2].x()) * v2.y() - (y - _v[2].y()) * v2.x();
+
+    is_inside = (cross1 > 0 && cross2 > 0 && cross3 > 0) ||
+                (cross1 < 0 && cross2 < 0 && cross3 < 0);
+    return is_inside;
+}
+
+static bool insideTriangle(float x, float y, const Vector4f* _v){
     Vector3f v[3];
     for(int i=0;i<3;i++)
         v[i] = {_v[i].x(),_v[i].y(), 1.0};
@@ -259,15 +303,41 @@ static Eigen::Vector2f interpolate(float alpha, float beta, float gamma, const E
 //Screen space rasterization
 void rst::rasterizer::rasterize_triangle(const Triangle& t, const std::array<Eigen::Vector3f, 3>& view_pos) 
 {
-    // TODO: From your HW3, get the triangle rasterization code.
-    // TODO: Inside your rasterization loop:
-    //    * v[i].w() is the vertex view space depth value z.
-    //    * Z is interpolated view space depth for the current pixel
-    //    * zp is depth between zNear and zFar, used for z-buffer
+    bool is_inside;
+    Eigen::Vector3f pixel;
 
-    // float Z = 1.0 / (alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
-    // float zp = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
-    // zp *= Z;
+    auto v = t.toVector4();
+    
+    // TODO : Find out the bounding box of current triangle.
+    rst::bounding_box box;
+    getTriangleBoundingBox(t, box);
+    
+    // iterate through the pixel and find if the current pixel is inside the triangle
+    for (int y = int(box.min_point.y()); y < int(box.max_point.y()); y++) {
+        for (int x = int(box.min_point.x()); x < int(box.max_point.x()); x++) {
+            is_inside = insideTriangle(x + 0.5, y + 0.5, t.v);
+            if (is_inside) {
+                //    * v[i].w() is the vertex view space depth value z.
+                //    * Z is interpolated view space depth for the current pixel
+                //    * zp is depth between zNear and zFar, used for z-buffer
+                auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
+                float Z = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+                float zp = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+                zp *= Z;
+
+                if (zp < depth_buf[x * width + y]) {
+                    pixel.x() = x;
+                    pixel.y() = y;
+                    pixel.z() = zp;
+
+                    // Set the color of the pixel
+                    set_pixel(pixel, t.getColor());
+                    depth_buf[x * width + y] = zp;
+                }
+
+            }
+        }
+    }
 
     // TODO: Interpolate the attributes:
     // auto interpolated_color
